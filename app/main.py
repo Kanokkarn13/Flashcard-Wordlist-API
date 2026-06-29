@@ -2,7 +2,9 @@ import math
 import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
+import os
 from fastapi import FastAPI, Depends, HTTPException, Query, Path, status
+from fastapi.responses import HTMLResponse
 
 from app.database import verify_db_integrity, get_db_connection
 from app.auth import verify_api_key, verify_admin_key
@@ -216,6 +218,26 @@ async def get_random_word(
     return dict(row)
 
 
+@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+async def get_admin_dashboard():
+    """Serve the Web Admin Dashboard to manage client API keys."""
+    template_path = os.path.join(os.path.dirname(__file__), "templates", "dashboard.html")
+    if not os.path.exists(template_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Admin dashboard template not found."
+        )
+    try:
+        with open(template_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read dashboard template: {e}"
+        )
+
+
 # --- ADMIN KEY MANAGEMENT ENDPOINTS (SECURED WITH X-ADMIN-KEY) ---
 
 @app.post(
@@ -326,4 +348,24 @@ async def revoke_api_key(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to revoke API Key: {e}"
+        )
+
+
+@app.get(
+    "/health",
+    summary="Get API health status",
+    tags=["System"],
+)
+async def get_health_status():
+    """Check database connection and return record count."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM words")
+            count = cursor.fetchone()[0]
+        return {"status": "healthy", "database_records": count}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database connection error: {e}"
         )

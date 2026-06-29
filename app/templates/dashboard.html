@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSK Wordlist API - Administrative Control Center</title>
+    <!-- Outfit Google Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --panel-bg: rgba(255, 255, 255, 0.02);
+            --panel-border: rgba(255, 255, 255, 0.06);
+            --text-color: #f3f4f6;
+            --text-muted: #9ca3af;
+            --primary: #8b5cf6;
+            --primary-hover: #a78bfa;
+            --success: #10b981;
+            --danger: #ef4444;
+            --danger-hover: #f87171;
+            --glow: rgba(139, 92, 246, 0.15);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(90, 40, 200, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.03) 0%, transparent 40%);
+            color: var(--text-color);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow-x: hidden;
+            padding: 20px;
+        }
+
+        /* Glassmorphism Container */
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            padding: 30px;
+            transition: all 0.3s ease;
+        }
+
+        /* --- AUTH SECTION --- */
+        #auth-wrapper {
+            width: 100%;
+            max-width: 420px;
+            text-align: center;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .auth-logo {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 50%, #10b981 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .auth-subtitle {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+            position: relative;
+        }
+
+        label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .input-control {
+            width: 100%;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            color: var(--text-color);
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .input-control:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px var(--glow);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .btn {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(139, 92, 246, 0.35);
+            background: linear-gradient(135deg, var(--primary-hover) 0%, var(--primary) 100%);
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        /* --- DASHBOARD SECTION --- */
+        #dashboard-wrapper {
+            display: none;
+            width: 100%;
+            max-width: 1100px;
+            animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .header-section {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            border-bottom: 1px solid var(--panel-border);
+            padding-bottom: 20px;
+        }
+
+        .logo-title {
+            font-weight: 700;
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, #a78bfa 0%, #10b981 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .btn-logout {
+            width: auto;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--panel-border);
+            box-shadow: none;
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+
+        .btn-logout:hover {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--danger);
+            color: var(--danger-hover);
+            box-shadow: none;
+        }
+
+        /* Grid Layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.5fr;
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Stats Card */
+        .stats-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .stat-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 18px;
+        }
+
+        .stat-info h4 {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+        }
+
+        .stat-info p {
+            font-size: 1.7rem;
+            font-weight: 700;
+            color: var(--text-color);
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        /* Key Generator Card */
+        .card-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--text-color);
+        }
+
+        /* Copy Key Modal Box */
+        .generated-key-container {
+            display: none;
+            background: rgba(16, 185, 129, 0.05);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .generated-key-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--success);
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .key-copy-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .key-text {
+            font-family: monospace;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 8px 12px;
+            border-radius: 4px;
+            flex-grow: 1;
+            font-size: 0.95rem;
+            color: var(--text-color);
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        .btn-copy {
+            background: var(--success);
+            box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);
+            width: auto;
+            font-size: 0.85rem;
+            padding: 8px 14px;
+        }
+
+        .btn-copy:hover {
+            background: #34d399;
+            box-shadow: 0 6px 15px rgba(16, 185, 129, 0.35);
+        }
+
+        /* API Keys Table Panel */
+        .keys-table-panel {
+            width: 100%;
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            margin-top: 15px;
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+
+        th, td {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.02);
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .td-key {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .btn-revoke {
+            padding: 6px 12px;
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger-hover);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-revoke:hover {
+            background: var(--danger);
+            color: white;
+            box-shadow: 0 4px 10px rgba(239, 68, 68, 0.25);
+        }
+
+        /* Error/Message banner */
+        .alert-banner {
+            display: none;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .alert-banner-danger {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: var(--danger-hover);
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. LOGIN / AUTH SCREEN -->
+    <div id="auth-wrapper" class="glass-panel">
+        <h1 class="auth-logo">HSK API</h1>
+        <p class="auth-subtitle">Administrative Control Center</p>
+        
+        <div id="login-error" class="alert-banner alert-banner-danger"></div>
+        
+        <div class="form-group">
+            <label for="admin-key-input">Admin Secret Key</label>
+            <input type="password" id="admin-key-input" class="input-control" placeholder="Enter X-ADMIN-KEY...">
+        </div>
+        
+        <button id="btn-login" class="btn" onclick="attemptLogin()">Unlock Panel</button>
+    </div>
+
+    <!-- 2. CONTROL PANEL DASHBOARD -->
+    <div id="dashboard-wrapper" class="glass-panel">
+        <div class="header-section">
+            <div>
+                <h1 class="logo-title">HSK API Control Center</h1>
+                <p style="font-size: 0.9rem; color: var(--text-muted); margin-top: 4px;">Manage client access credentials</p>
+            </div>
+            <button class="btn btn-logout" onclick="logout()">Lock Panel</button>
+        </div>
+
+        <div class="dashboard-grid">
+            <!-- Left Side: Stats and System Overview -->
+            <div class="stats-panel">
+                <div class="glass-panel" style="padding: 20px; border-radius: 12px;">
+                    <h3 class="card-title" style="margin-bottom: 15px;">System Overview</h3>
+                    
+                    <div class="stat-box">
+                        <div class="stat-info">
+                            <h4>Database Cache</h4>
+                            <p id="stat-db-count">--</p>
+                        </div>
+                        <span id="badge-db-status" class="badge badge-success">Online</span>
+                    </div>
+
+                    <div class="stat-box" style="margin-top: 15px;">
+                        <div class="stat-info">
+                            <h4>Total API Keys</h4>
+                            <p id="stat-keys-count">0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: API Key Generator -->
+            <div class="glass-panel" style="padding: 20px; border-radius: 12px;">
+                <h3 class="card-title">Generate Client Access Key</h3>
+                
+                <div class="form-group">
+                    <label for="client-name-input">Client Name / Owner</label>
+                    <input type="text" id="client-name-input" class="input-control" placeholder="e.g. iOS Mobile App Client">
+                </div>
+                
+                <button class="btn" onclick="generateApiKey()">Generate API Key</button>
+
+                <!-- Copy-to-Clipboard Container (revealed on success) -->
+                <div id="generated-key-box" class="generated-key-container">
+                    <p class="generated-key-label">Key Created Successfully</p>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 10px;">Copy this key now. It will not be shown again.</p>
+                    <div class="key-copy-row">
+                        <div id="new-key-value" class="key-text">hsk_key_placeholder</div>
+                        <button class="btn btn-copy" onclick="copyNewKey()">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom: API Keys Table List -->
+        <div class="glass-panel keys-table-panel" style="padding: 20px; border-radius: 12px;">
+            <h3 class="card-title" style="margin-bottom: 5px;">Active Client API Keys</h3>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">List of all generated access tokens. Revoking a key blocks access immediately.</p>
+            
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;">ID</th>
+                            <th>Client / Owner Name</th>
+                            <th>API Access Key (Masked)</th>
+                            <th>Created Time</th>
+                            <th>Status</th>
+                            <th style="width: 120px; text-align: right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="api-keys-table-body">
+                        <!-- Filled dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripting Layer -->
+    <script>
+        const API_BASE = window.location.origin;
+
+        // Check if admin secret is already saved in session storage
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedKey = sessionStorage.getItem('admin_key');
+            if (savedKey) {
+                document.getElementById('admin-key-input').value = savedKey;
+                attemptLogin();
+            }
+        });
+
+        // Toggle Alert Message banner
+        function showAlert(elementId, text, isShow = true) {
+            const el = document.getElementById(elementId);
+            if (isShow) {
+                el.innerText = text;
+                el.style.display = 'block';
+            } else {
+                el.style.display = 'none';
+            }
+        }
+
+        // Login Authentication Trigger
+        async function attemptLogin() {
+            const key = document.getElementById('admin-key-input').value.trim();
+            if (!key) {
+                showAlert('login-error', 'Please enter a master admin secret key.');
+                return;
+            }
+
+            showAlert('login-error', '', false);
+            
+            try {
+                // Test key by calling the list keys endpoint
+                const res = await fetch(`${API_BASE}/admin/keys`, {
+                    headers: { 'X-ADMIN-KEY': key }
+                });
+
+                if (res.status === 200) {
+                    // Success: save key and render dashboard
+                    sessionStorage.setItem('admin_key', key);
+                    document.getElementById('auth-wrapper').style.display = 'none';
+                    document.getElementById('dashboard-wrapper').style.display = 'block';
+                    loadDashboardData();
+                } else {
+                    const err = await res.json();
+                    showAlert('login-error', err.detail || 'Access denied: Invalid Admin Key.');
+                }
+            } catch (e) {
+                showAlert('login-error', 'Network error. Could not connect to API server.');
+            }
+        }
+
+        // Logout
+        function logout() {
+            sessionStorage.removeItem('admin_key');
+            document.getElementById('admin-key-input').value = '';
+            document.getElementById('generated-key-box').style.display = 'none';
+            document.getElementById('client-name-input').value = '';
+            document.getElementById('dashboard-wrapper').style.display = 'none';
+            document.getElementById('auth-wrapper').style.display = 'block';
+        }
+
+        // Load stats and keys table
+        async function loadDashboardData() {
+            const adminKey = sessionStorage.getItem('admin_key');
+            
+            // 1. Fetch Health Stats
+            try {
+                const healthRes = await fetch(`${API_BASE}/health`);
+                if (healthRes.ok) {
+                    const health = await healthRes.json();
+                    document.getElementById('stat-db-count').innerText = health.database_records.toLocaleString() + ' words';
+                    document.getElementById('badge-db-status').innerText = 'Online';
+                    document.getElementById('badge-db-status').className = 'badge badge-success';
+                }
+            } catch (e) {
+                document.getElementById('stat-db-count').innerText = 'Offline';
+                document.getElementById('badge-db-status').innerText = 'Error';
+                document.getElementById('badge-db-status').className = 'badge badge-danger';
+            }
+
+            // 2. Fetch Keys List
+            try {
+                const keysRes = await fetch(`${API_BASE}/admin/keys`, {
+                    headers: { 'X-ADMIN-KEY': adminKey }
+                });
+
+                if (keysRes.ok) {
+                    const keys = await keysRes.json();
+                    renderKeysTable(keys);
+                    document.getElementById('stat-keys-count').innerText = keys.length;
+                }
+            } catch (e) {
+                console.error("Failed to load keys: ", e);
+            }
+        }
+
+        // Render table records
+        function renderKeysTable(keys) {
+            const tbody = document.getElementById('api-keys-table-body');
+            tbody.innerHTML = '';
+
+            if (keys.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No API keys generated yet.</td></tr>`;
+                return;
+            }
+
+            keys.forEach(k => {
+                const tr = document.createElement('tr');
+                
+                // Mask the actual key showing only prefix/suffix for security
+                const keyDisplay = k.key.length > 15 
+                    ? k.key.substring(0, 8) + '...' + k.key.substring(k.key.length - 6)
+                    : k.key;
+                
+                const statusBadge = k.is_active
+                    ? `<span class="badge badge-success">Active</span>`
+                    : `<span class="badge badge-danger">Revoked</span>`;
+                
+                const actionButton = k.is_active
+                    ? `<button class="btn-revoke" onclick="revokeKey(${k.id}, '${k.name}')">Revoke</button>`
+                    : `<span style="font-size: 0.8rem; color: var(--text-muted);">Revoked</span>`;
+
+                tr.innerHTML = `
+                    <td>${k.id}</td>
+                    <td style="font-weight: 500;">${k.name}</td>
+                    <td class="td-key">${keyDisplay}</td>
+                    <td style="color: var(--text-muted); font-size: 0.85rem;">${k.created_at}</td>
+                    <td>${statusBadge}</td>
+                    <td style="text-align: right;">${actionButton}</td>
+                `;
+                
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Generate dynamic key
+        async function generateApiKey() {
+            const nameInput = document.getElementById('client-name-input');
+            const ownerName = nameInput.value.trim();
+            
+            if (!ownerName) {
+                alert('Please enter a Client Name/Owner.');
+                return;
+            }
+
+            const adminKey = sessionStorage.getItem('admin_key');
+            
+            try {
+                const res = await fetch(`${API_BASE}/admin/keys`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-ADMIN-KEY': adminKey
+                    },
+                    body: JSON.stringify({ name: ownerName })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    
+                    // Display new key container
+                    document.getElementById('new-key-value').innerText = data.key;
+                    document.getElementById('generated-key-box').style.display = 'block';
+                    
+                    // Clean input & reload
+                    nameInput.value = '';
+                    loadDashboardData();
+                } else {
+                    const err = await res.json();
+                    alert('Error creating key: ' + (err.detail || res.statusText));
+                }
+            } catch (e) {
+                alert('Failed to generate key due to network error.');
+            }
+        }
+
+        // Copy Key helper
+        function copyNewKey() {
+            const keyText = document.getElementById('new-key-value').innerText;
+            navigator.clipboard.writeText(keyText).then(() => {
+                const btn = document.querySelector('.btn-copy');
+                const originalText = btn.innerText;
+                btn.innerText = 'Copied!';
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                }, 1500);
+            }).catch(err => {
+                alert('Could not copy to clipboard. Select text manually.');
+            });
+        }
+
+        // Revoke client key
+        async function revokeKey(id, name) {
+            const confirmRevoke = confirm(`Are you sure you want to revoke API Access for: "${name}"?\nThis action is permanent and cannot be undone.`);
+            if (!confirmRevoke) return;
+
+            const adminKey = sessionStorage.getItem('admin_key');
+
+            try {
+                const res = await fetch(`${API_BASE}/admin/keys/${id}/revoke`, {
+                    method: 'POST',
+                    headers: { 'X-ADMIN-KEY': adminKey }
+                });
+
+                if (res.ok) {
+                    loadDashboardData();
+                } else {
+                    const err = await res.json();
+                    alert('Error revoking key: ' + (err.detail || res.statusText));
+                }
+            } catch (e) {
+                alert('Network error. Failed to revoke key.');
+            }
+        }
+    </script>
+</body>
+</html>
