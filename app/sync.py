@@ -10,7 +10,7 @@ logger = logging.getLogger("api")
 
 # Load database paths
 DB_PATH = os.getenv("DB_PATH", "hsk_vocab.db")
-CSV_PATH = "hsk_vocab.csv"
+CSV_PATH = os.getenv("CSV_PATH", "hsk_vocab.csv")
 
 async def sync_database_from_supabase(db_path: str = None):
     """
