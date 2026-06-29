@@ -3,6 +3,11 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
 import os
+from dotenv import load_dotenv
+
+# Load local environment variables
+load_dotenv()
+
 from fastapi import FastAPI, Depends, HTTPException, Query, Path, status
 from fastapi.responses import HTMLResponse
 
@@ -10,6 +15,7 @@ from app.database import verify_db_integrity, get_db_connection
 from app.auth import verify_api_key, verify_admin_key
 from app.logger import StructuredLoggingMiddleware
 from app.schemas import PaginatedResponse, WordSchema, PaginationMetadata, KeyCreateSchema, KeyResponseSchema
+from app.sync import debouncer
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -369,3 +375,30 @@ async def get_health_status():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database connection error: {e}"
         )
+
+
+# Load Webhook Secret Configuration
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "hsk_webhook_secret_default_key")
+
+@app.post(
+    "/webhook/supabase",
+    summary="Supabase database synchronization webhook",
+    tags=["System"],
+)
+async def supabase_webhook(
+    secret: str = Query(..., description="Secure webhook authentication token")
+):
+    """
+    Receives database change notifications from Supabase.
+    Triggers an asynchronous, 10-second debounced sync process in the background.
+    """
+    if secret != WEBHOOK_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized: Invalid webhook secret token."
+        )
+        
+    # Trigger the debouncer (non-blocking asyncio task)
+    await debouncer.trigger()
+    
+    return {"message": "Synchronization triggered in background."}

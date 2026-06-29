@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import sys
+import shutil
 import logging
 from contextlib import contextmanager
 
@@ -60,6 +61,45 @@ def verify_db_integrity():
     stored in the database metadata table (minimum 5300 records).
     If validation fails, shuts down the application immediately.
     """
+    packaged_db = "hsk_vocab.db"
+    active_db = DB_PATH
+    
+    # Auto-Merge / Copy routine if running on a persistent disk volume (different path)
+    if os.path.abspath(active_db) != os.path.abspath(packaged_db):
+        logger.info(f"Deployment Sync: Active DB '{active_db}' differs from Packaged DB '{packaged_db}'. Synchronizing vocabulary...")
+        
+        if os.path.exists(packaged_db):
+            try:
+                if not os.path.exists(active_db):
+                    # Destination folder might not exist yet (create parent directories)
+                    os.makedirs(os.path.dirname(os.path.abspath(active_db)), exist_ok=True)
+                    shutil.copyfile(packaged_db, active_db)
+                    logger.info(f"Deployment Sync: Copied template database to active path '{active_db}'.")
+                else:
+                    # Target exists: Sync vocab and metadata, preserving api_keys
+                    conn = sqlite3.connect(active_db)
+                    cursor = conn.cursor()
+                    cursor.execute(f"ATTACH DATABASE '{packaged_db}' AS pkg_db")
+                    
+                    # Sync words table
+                    cursor.execute("DROP TABLE IF EXISTS words")
+                    cursor.execute("CREATE TABLE words AS SELECT * FROM pkg_db.words")
+                    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_words_word ON words(word)")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_words_level ON words(level)")
+                    
+                    # Sync metadata table
+                    cursor.execute("DROP TABLE IF EXISTS metadata")
+                    cursor.execute("CREATE TABLE metadata AS SELECT * FROM pkg_db.metadata")
+                    
+                    cursor.execute("DETACH DATABASE pkg_db")
+                    conn.commit()
+                    conn.close()
+                    logger.info("Deployment Sync: Vocabulary and metadata successfully updated, client API keys preserved.")
+            except Exception as e:
+                logger.error(f"Deployment Sync: Failed to auto-merge databases: {e}")
+        else:
+            logger.warning(f"Deployment Sync: Packaged database template not found at '{packaged_db}'. Skipping merge.")
+
     # Initialize the API keys table schema and seed data
     init_api_keys_table()
     
