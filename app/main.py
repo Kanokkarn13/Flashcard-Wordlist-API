@@ -3,6 +3,8 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
 import os
+import requests
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 # Load local environment variables
@@ -12,7 +14,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Path, status
 from fastapi.responses import HTMLResponse
 
 from app.database import verify_db_integrity, get_db_connection
-from app.auth import verify_api_key, verify_admin_key
+from app.auth import verify_api_key, verify_admin_key, keys_cache
 from app.logger import StructuredLoggingMiddleware
 from app.schemas import PaginatedResponse, WordSchema, PaginationMetadata, KeyCreateSchema, KeyResponseSchema
 from app.sync import debouncer
@@ -256,33 +258,48 @@ async def get_admin_dashboard():
 )
 async def create_api_key(body: KeyCreateSchema):
     """
-    Generate a new unique API key.
+    Generate a new unique API key and store it on Supabase.
     Requires `X-ADMIN-KEY` authorization.
     """
     new_key = f"hsk_key_{secrets.token_hex(16)}"
     
+    url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
+    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
+    
+    if not url_base or not anon_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Configuration error: Supabase credentials missing."
+        )
+        
+    url = f"{url_base}/rest/v1/api_keys"
+    headers = {
+        "apikey": anon_key,
+        "Authorization": f"Bearer {anon_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    payload = {
+        "key": new_key,
+        "name": body.name,
+        "is_active": True
+    }
+    
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO api_keys (key, name, is_active) VALUES (?, ?, 1)",
-                (new_key, body.name)
+        res = requests.post(url, json=payload, headers=headers)
+        if res.status_code != 201:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to generate API Key in Supabase: {res.text}"
             )
-            key_id = cursor.lastrowid
-            conn.commit()
-            
-            # Fetch generated details to return
-            cursor.execute(
-                "SELECT id, key, name, is_active, created_at, revoked_at FROM api_keys WHERE id = ?",
-                (key_id,)
-            )
-            row = cursor.fetchone()
-            
-        return dict(row)
+        record = res.json()[0]
+        return record
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate API Key: {e}"
+            detail=f"Error generating API Key: {e}"
         )
 
 @app.get(
@@ -294,21 +311,38 @@ async def create_api_key(body: KeyCreateSchema):
 )
 async def list_api_keys():
     """
-    Retrieve all client API keys stored in SQLite.
+    Retrieve all client API keys stored in Supabase.
     Requires `X-ADMIN-KEY` authorization.
     """
+    url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
+    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
+    
+    if not url_base or not anon_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Configuration error: Supabase credentials missing."
+        )
+        
+    url = f"{url_base}/rest/v1/api_keys?order=id.desc"
+    headers = {
+        "apikey": anon_key,
+        "Authorization": f"Bearer {anon_key}"
+    }
+    
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, key, name, is_active, created_at, revoked_at FROM api_keys ORDER BY id DESC"
+        res = requests.get(url, headers=headers)
+        if res.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to query API keys from Supabase: {res.text}"
             )
-            rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        return res.json()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to query API keys database: {e}"
+            detail=f"Error listing API Keys: {e}"
         )
 
 @app.post(
@@ -321,32 +355,61 @@ async def revoke_api_key(
     key_id: int = Path(..., description="The unique database ID of the API Key to revoke")
 ):
     """
-    Revoke a client API key. The key will immediately become unusable.
+    Revoke a client API key in Supabase. The key will immediately become unusable.
     Requires `X-ADMIN-KEY` authorization.
     """
+    url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
+    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
+    
+    if not url_base or not anon_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Configuration error: Supabase credentials missing."
+        )
+        
+    headers = {
+        "apikey": anon_key,
+        "Authorization": f"Bearer {anon_key}",
+        "Content-Type": "application/json"
+    }
+    
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Verify it exists
-            cursor.execute("SELECT id, is_active FROM api_keys WHERE id = ?", (key_id,))
-            row = cursor.fetchone()
-            if not row:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"API Key with ID {key_id} not found."
-                )
-                
-            if not row["is_active"]:
-                return {"message": f"API Key with ID {key_id} is already revoked."}
-                
-            # Perform revocation
-            cursor.execute(
-                "UPDATE api_keys SET is_active = 0, revoked_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (key_id,)
+        # Check if the key exists
+        url_check = f"{url_base}/rest/v1/api_keys?id=eq.{key_id}"
+        res_check = requests.get(url_check, headers=headers)
+        if res_check.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to verify API key presence: {res_check.text}"
             )
-            conn.commit()
             
+        data = res_check.json()
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"API Key with ID {key_id} not found."
+            )
+            
+        record = data[0]
+        if not record.get("is_active"):
+            return {"message": f"API Key with ID {key_id} is already revoked."}
+            
+        # Perform revocation
+        url_patch = f"{url_base}/rest/v1/api_keys?id=eq.{key_id}"
+        payload = {
+            "is_active": False,
+            "revoked_at": datetime.now(timezone.utc).isoformat()
+        }
+        res_patch = requests.patch(url_patch, json=payload, headers=headers)
+        if res_patch.status_code not in (200, 204):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to revoke API key in Supabase: {res_patch.text}"
+            )
+            
+        # Invalidate in-memory cache instantly
+        keys_cache.invalidate(record.get("key"))
+        
         return {"message": f"Successfully revoked API Key with ID {key_id}."}
     except HTTPException:
         raise

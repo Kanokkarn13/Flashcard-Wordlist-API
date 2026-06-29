@@ -1,13 +1,12 @@
 import sqlite3
 import os
 import sys
-import shutil
 import logging
 from contextlib import contextmanager
 
 logger = logging.getLogger("api")
 
-# DB path should be configurable via env, default to local root path
+# Database path default to local HSK vocab DB
 DB_PATH = os.getenv("DB_PATH", "hsk_vocab.db")
 
 @contextmanager
@@ -20,40 +19,6 @@ def get_db_connection():
     finally:
         conn.close()
 
-def init_api_keys_table():
-    """
-    Initializes the api_keys table in SQLite if it doesn't exist.
-    Inserts a default developer key 'hsk_dev_secret_key' if the table is empty.
-    """
-    logger.info("Initializing API Key management table...")
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS api_keys (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    key TEXT UNIQUE NOT NULL,
-                    name TEXT NOT NULL,
-                    is_active INTEGER NOT NULL DEFAULT 1,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    revoked_at DATETIME
-                )
-            """)
-            
-            # Check if table is empty, seed default key if so
-            cursor.execute("SELECT COUNT(*) FROM api_keys")
-            count = cursor.fetchone()[0]
-            if count == 0:
-                logger.info("Seeding default developer API key into SQLite...")
-                cursor.execute(
-                    "INSERT INTO api_keys (key, name, is_active) VALUES (?, ?, 1)",
-                    ("hsk_dev_secret_key", "Default Developer Key")
-                )
-            conn.commit()
-    except Exception as e:
-        logger.critical(f"Failed to initialize API key table: {e}")
-        sys.exit(1)
-
 def verify_db_integrity():
     """
     Checks the integrity of the SQLite database at startup.
@@ -61,48 +26,6 @@ def verify_db_integrity():
     stored in the database metadata table (minimum 5300 records).
     If validation fails, shuts down the application immediately.
     """
-    packaged_db = "hsk_vocab.db"
-    active_db = DB_PATH
-    
-    # Auto-Merge / Copy routine if running on a persistent disk volume (different path)
-    if os.path.abspath(active_db) != os.path.abspath(packaged_db):
-        logger.info(f"Deployment Sync: Active DB '{active_db}' differs from Packaged DB '{packaged_db}'. Synchronizing vocabulary...")
-        
-        if os.path.exists(packaged_db):
-            try:
-                if not os.path.exists(active_db):
-                    # Destination folder might not exist yet (create parent directories)
-                    os.makedirs(os.path.dirname(os.path.abspath(active_db)), exist_ok=True)
-                    shutil.copyfile(packaged_db, active_db)
-                    logger.info(f"Deployment Sync: Copied template database to active path '{active_db}'.")
-                else:
-                    # Target exists: Sync vocab and metadata, preserving api_keys
-                    conn = sqlite3.connect(active_db)
-                    cursor = conn.cursor()
-                    cursor.execute(f"ATTACH DATABASE '{packaged_db}' AS pkg_db")
-                    
-                    # Sync words table
-                    cursor.execute("DROP TABLE IF EXISTS words")
-                    cursor.execute("CREATE TABLE words AS SELECT * FROM pkg_db.words")
-                    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_words_word ON words(word)")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_words_level ON words(level)")
-                    
-                    # Sync metadata table
-                    cursor.execute("DROP TABLE IF EXISTS metadata")
-                    cursor.execute("CREATE TABLE metadata AS SELECT * FROM pkg_db.metadata")
-                    
-                    cursor.execute("DETACH DATABASE pkg_db")
-                    conn.commit()
-                    conn.close()
-                    logger.info("Deployment Sync: Vocabulary and metadata successfully updated, client API keys preserved.")
-            except Exception as e:
-                logger.error(f"Deployment Sync: Failed to auto-merge databases: {e}")
-        else:
-            logger.warning(f"Deployment Sync: Packaged database template not found at '{packaged_db}'. Skipping merge.")
-
-    # Initialize the API keys table schema and seed data
-    init_api_keys_table()
-    
     logger.info(f"Initializing database integrity check (DB_PATH: {DB_PATH})...")
     
     if not os.path.exists(DB_PATH):
