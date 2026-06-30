@@ -1,0 +1,49 @@
+name: Weekly Supabase Data Sync & Backup
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Every Sunday at 00:00 UTC
+  workflow_dispatch: # Allows manual trigger from Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          # Fetch all history so push will work without conflicts
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests python-dotenv
+
+      - name: Run Sync and Build
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          python scripts/update_git_backup.py
+
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Only commit if changes are detected
+          if git diff --quiet hsk_vocab.csv hsk_vocab.db; then
+            echo "No changes in HSK vocabulary or SQLite database. Skipping push."
+          else
+            echo "Changes detected. Committing and pushing..."
+            git add hsk_vocab.csv hsk_vocab.db
+            git commit -m "chore(backup): auto-sync vocabulary and SQLite db from Supabase [skip ci]"
+            git push origin main
+          fi

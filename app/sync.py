@@ -12,115 +12,75 @@ logger = logging.getLogger("api")
 DB_PATH = os.getenv("DB_PATH", "hsk_vocab.db")
 CSV_PATH = os.getenv("CSV_PATH", "hsk_vocab.csv")
 
+# Global lock to guarantee single-thread file updates and prevent concurrent write race conditions
+sync_lock = asyncio.Lock()
+
 async def sync_database_from_supabase(db_path: str = None):
     """
     Fetch the latest vocabulary dataset from Supabase (HSK and translation definitions),
-    merge EN and TH definitions, and rewrite the words and metadata tables in SQLite.
-    This preserves other tables (like api_keys) untouched.
+    merge EN and TH definitions, and update the in-memory RAM cache directly.
+    Bypasses local CSV and SQLite database writes to run as a pure in-memory data pipeline.
     """
-    if db_path is None:
-        db_path = DB_PATH
+    async with sync_lock:
+        url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
+        anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
 
-    url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
-    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
-
-    if not url_base or not anon_key:
-        logger.error("Sync: Supabase credentials not found in environment variables. Sync aborted.")
-        return False
-
-    headers = {
-        "apikey": anon_key,
-        "Authorization": f"Bearer {anon_key}"
-    }
-
-    try:
-        # Run standard synchronous HTTP requests inside an executor thread to prevent blocking FastAPI
-        loop = asyncio.get_running_loop()
-        enriched_vocab = await loop.run_in_executor(None, _fetch_and_merge_data, url_base, headers)
-        
-        if not enriched_vocab:
-            logger.error("Sync: Fetched dataset is empty. Sync aborted.")
+        if not url_base or not anon_key:
+            logger.error("Sync: Supabase credentials not found in environment variables. Sync aborted.")
             return False
 
-        # Validate safety threshold
-        csv_count = len(enriched_vocab)
-        min_threshold = 5300
-        if csv_count < min_threshold:
-            logger.error(
-                f"Sync: Integrity check failed. Downloaded dataset has {csv_count} records, "
-                f"which is less than the safety threshold of {min_threshold}. Sync aborted."
-            )
+        headers = {
+            "apikey": anon_key,
+            "Authorization": f"Bearer {anon_key}"
+        }
+
+        try:
+            # Run standard synchronous HTTP requests inside an executor thread to prevent blocking FastAPI
+            loop = asyncio.get_running_loop()
+            enriched_vocab = await loop.run_in_executor(None, _fetch_and_merge_data, url_base, headers)
+            
+            if not enriched_vocab:
+                logger.error("Sync: Fetched dataset is empty. Sync aborted.")
+                return False
+
+            # Validate safety threshold
+            csv_count = len(enriched_vocab)
+            min_threshold = 5300
+            if csv_count < min_threshold:
+                logger.error(
+                    f"Sync: Integrity check failed. Downloaded dataset has {csv_count} records, "
+                    f"which is less than the safety threshold of {min_threshold}. Sync aborted."
+                )
+                return False
+
+            # Dynamically update the in-memory RAM cache
+            try:
+                from app.vocab_cache import vocab_cache
+                # Ensure fields in enriched_vocab match expected types (int for level/id)
+                formatted_vocab = []
+                for item in enriched_vocab:
+                    formatted_item = {
+                        "id": int(item["id"]),
+                        "word": item["word"],
+                        "pinyin": item["pinyin"],
+                        "definition": item["definition"],
+                        "definition_th": item["definition_th"],
+                        "level": int(item["level"]) if item.get("level") else None,
+                        "example_sentence": item.get("example_sentence", ""),
+                        "example_pinyin": item.get("example_pinyin", "")
+                    }
+                    formatted_vocab.append(formatted_item)
+                vocab_cache.set_words(formatted_vocab)
+                logger.info(f"Sync: Successfully updated FastAPI in-memory RAM cache dynamically with {csv_count} records.")
+            except Exception as cache_err:
+                logger.error(f"Sync: Failed to update RAM cache during synchronization: {cache_err}")
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Sync: Pipeline synchronization failed: {e}")
             return False
-
-        # 1. Update the local CSV file
-        with open(CSV_PATH, mode="w", encoding="utf-8", newline="") as f:
-            fields = ["id", "word", "pinyin", "definition", "definition_th", "level", "example_sentence", "example_pinyin"]
-            writer = csv.DictWriter(f, fieldnames=fields)
-            writer.writeheader()
-            writer.writerows(enriched_vocab)
-        logger.info(f"Sync: Successfully updated CSV cache at '{CSV_PATH}' dynamically.")
-
-        # 2. Update SQLite words and metadata tables
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Recreate words table dynamically
-        cursor.execute("DROP TABLE IF EXISTS words")
-        cursor.execute("""
-            CREATE TABLE words (
-                id INTEGER PRIMARY KEY,
-                word TEXT NOT NULL,
-                pinyin TEXT,
-                definition TEXT,
-                definition_th TEXT,
-                level INTEGER,
-                example_sentence TEXT,
-                example_pinyin TEXT
-            )
-        """)
-
-        # Insert fresh records
-        cursor.executemany("""
-            INSERT INTO words (id, word, pinyin, definition, definition_th, level, example_sentence, example_pinyin)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            (
-                int(row["id"]),
-                row["word"],
-                row["pinyin"],
-                row["definition"],
-                row["definition_th"],
-                int(row["level"]) if row["level"] else None,
-                row["example_sentence"],
-                row["example_pinyin"]
-            ) for row in enriched_vocab
-        ])
-
-        # Create indexes
-        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_words_word ON words(word)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_words_level ON words(level)")
-
-        # Create metadata table and insert dynamic expected records count
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-        """)
-        cursor.execute(
-            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('expected_records', ?)",
-            (str(csv_count),)
-        )
-
-        conn.commit()
-        conn.close()
-
-        logger.info(f"Sync: Successfully updated SQLite database at '{db_path}' with {csv_count} records.")
-        return True
-
-    except Exception as e:
-        logger.error(f"Sync: Database synchronization failed: {e}")
-        return False
 
 def _fetch_and_merge_data(url_base: str, headers: dict):
     """Internal helper running HTTP calls synchronously inside a thread pool."""

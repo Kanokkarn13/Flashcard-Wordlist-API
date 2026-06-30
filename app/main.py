@@ -1,5 +1,6 @@
 import math
 import secrets
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
 import os
@@ -10,11 +11,15 @@ from dotenv import load_dotenv
 # Load local environment variables
 load_dotenv()
 
+import logging
 from fastapi import FastAPI, Depends, HTTPException, Query, Path, status
 from fastapi.responses import HTMLResponse
 
 from app.database import verify_db_integrity, get_db_connection
-from app.auth import verify_api_key, verify_admin_key, keys_cache
+from app.auth import verify_api_key, verify_admin_key, api_keys_cache, load_api_keys_cache
+from app.vocab_cache import vocab_cache, load_vocab_cache, load_vocab_from_csv
+
+logger = logging.getLogger("api")
 from app.logger import StructuredLoggingMiddleware
 from app.schemas import PaginatedResponse, WordSchema, PaginationMetadata, KeyCreateSchema, KeyResponseSchema
 from app.sync import debouncer
@@ -22,8 +27,21 @@ from app.sync import debouncer
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events manager for the FastAPI application."""
-    # Run database integrity checks on startup
-    verify_db_integrity()
+    import asyncio
+    loop = asyncio.get_running_loop()
+
+    # Load API keys from Supabase to RAM cache on startup
+    await loop.run_in_executor(None, load_api_keys_cache)
+
+    # Load vocabulary from Supabase to RAM cache on startup (with fallback to CSV)
+    success = await loop.run_in_executor(None, load_vocab_cache)
+    if not success:
+        logger.warning("Startup: Failed to load vocabulary from Supabase. Attempting fallback to local CSV...")
+        fallback_success = await loop.run_in_executor(None, load_vocab_from_csv)
+        if not fallback_success:
+            logger.critical("Startup CRITICAL: Failed to load vocabulary from both Supabase and CSV cache. Exiting.")
+            import sys
+            sys.exit(1)
     yield
     # Cleanup on shutdown (if needed)
 
@@ -46,22 +64,18 @@ app.add_middleware(StructuredLoggingMiddleware)
 async def health_check():
     """
     Public health check endpoint.
-    Verifies that the application can query the underlying SQLite database.
+    Verifies that the application in-memory cache is loaded.
     """
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM words")
-            count = cursor.fetchone()[0]
-        return {
-            "status": "healthy",
-            "database_records": count
-        }
-    except Exception as e:
+    count = vocab_cache.count()
+    if count == 0:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"System unhealthy: Database connection error: {e}"
+            detail="System unhealthy: In-memory vocabulary cache is empty."
         )
+    return {
+        "status": "healthy",
+        "cache_records": count
+    }
 
 # --- BUSINESS ENDPOINTS (SECURED) ---
 
@@ -81,20 +95,10 @@ async def get_words(
     Requires `X-API-KEY` authorization.
     """
     offset = (page - 1) * per_page
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        # Get total records count
-        cursor.execute("SELECT COUNT(*) FROM words")
-        total_records = cursor.fetchone()[0]
-        
-        # Query matching records
-        cursor.execute(
-            "SELECT id, word, pinyin, definition, definition_th, level, example_sentence, example_pinyin "
-            "FROM words ORDER BY id LIMIT ? OFFSET ?",
-            (per_page, offset)
-        )
-        rows = cursor.fetchall()
+    all_words = vocab_cache.get_all()
+    total_records = len(all_words)
+    
+    rows = all_words[offset:offset + per_page]
         
     total_pages = math.ceil(total_records / per_page) if total_records > 0 else 0
     
@@ -107,8 +111,7 @@ async def get_words(
         has_previous=page > 1
     )
     
-    data = [dict(row) for row in rows]
-    return PaginatedResponse(metadata=metadata, data=data)
+    return PaginatedResponse(metadata=metadata, data=rows)
 
 @app.get(
     "/words/{level}",
@@ -127,20 +130,10 @@ async def get_words_by_level(
     Requires `X-API-KEY` authorization.
     """
     offset = (page - 1) * per_page
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        # Get total records for level
-        cursor.execute("SELECT COUNT(*) FROM words WHERE level = ?", (level,))
-        total_records = cursor.fetchone()[0]
-        
-        # Query level-filtered records
-        cursor.execute(
-            "SELECT id, word, pinyin, definition, definition_th, level, example_sentence, example_pinyin "
-            "FROM words WHERE level = ? ORDER BY id LIMIT ? OFFSET ?",
-            (level, per_page, offset)
-        )
-        rows = cursor.fetchall()
+    level_words = vocab_cache.get_by_level(level)
+    total_records = len(level_words)
+    
+    rows = level_words[offset:offset + per_page]
         
     total_pages = math.ceil(total_records / per_page) if total_records > 0 else 0
     
@@ -153,8 +146,7 @@ async def get_words_by_level(
         has_previous=page > 1
     )
     
-    data = [dict(row) for row in rows]
-    return PaginatedResponse(metadata=metadata, data=data)
+    return PaginatedResponse(metadata=metadata, data=rows)
 
 @app.get(
     "/word/{word}",
@@ -170,22 +162,14 @@ async def get_word_detail(
     Retrieve detailed parameters (HSK Level, translations, example sentences) for a specific word.
     Requires `X-API-KEY` authorization.
     """
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, word, pinyin, definition, definition_th, level, example_sentence, example_pinyin "
-            "FROM words WHERE word = ? LIMIT 1",
-            (word,)
-        )
-        row = cursor.fetchone()
-        
+    row = vocab_cache.get_by_word(word)
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Word '{word}' not found in HSK vocabulary list."
         )
         
-    return dict(row)
+    return row
 
 @app.get(
     "/random",
@@ -202,28 +186,14 @@ async def get_random_word(
     Optionally narrow the selection to a specific HSK level (1 to 6).
     Requires `X-API-KEY` authorization.
     """
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        if level is not None:
-            cursor.execute(
-                "SELECT id, word, pinyin, definition, definition_th, level, example_sentence, example_pinyin "
-                "FROM words WHERE level = ? ORDER BY RANDOM() LIMIT 1",
-                (level,)
-            )
-        else:
-            cursor.execute(
-                "SELECT id, word, pinyin, definition, definition_th, level, example_sentence, example_pinyin "
-                "FROM words ORDER BY RANDOM() LIMIT 1"
-            )
-        row = cursor.fetchone()
-        
+    row = vocab_cache.get_random(level)
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No words found matching selection criteria."
         )
         
-    return dict(row)
+    return row
 
 
 @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
@@ -293,6 +263,11 @@ async def create_api_key(body: KeyCreateSchema):
                 detail=f"Failed to generate API Key in Supabase: {res.text}"
             )
         record = res.json()[0]
+        
+        # Reload API keys cache in background
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, load_api_keys_cache)
+        
         return record
     except HTTPException:
         raise
@@ -407,8 +382,9 @@ async def revoke_api_key(
                 detail=f"Failed to revoke API key in Supabase: {res_patch.text}"
             )
             
-        # Invalidate in-memory cache instantly
-        keys_cache.invalidate(record.get("key"))
+        # Reload API keys cache in background to apply deactivation instantly
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(None, load_api_keys_cache)
         
         return {"message": f"Successfully revoked API Key with ID {key_id}."}
     except HTTPException:
@@ -426,18 +402,14 @@ async def revoke_api_key(
     tags=["System"],
 )
 async def get_health_status():
-    """Check database connection and return record count."""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM words")
-            count = cursor.fetchone()[0]
-        return {"status": "healthy", "database_records": count}
-    except Exception as e:
+    """Check in-memory cache connection and return record count."""
+    count = vocab_cache.count()
+    if count == 0:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database connection error: {e}"
+            detail="In-memory vocabulary cache is empty."
         )
+    return {"status": "healthy", "cache_records": count}
 
 
 # Load Webhook Secret Configuration
@@ -465,3 +437,54 @@ async def supabase_webhook(
     await debouncer.trigger()
     
     return {"message": "Synchronization triggered in background."}
+
+
+@app.post(
+    "/admin/keys/reload",
+    summary="Manually reload API keys cache from Supabase",
+    tags=["Admin Key Management"],
+    dependencies=[Depends(verify_admin_key)]
+)
+async def reload_api_keys():
+    """
+    Manually triggers a reload of the API keys cache from Supabase.
+    Requires `X-ADMIN-KEY` authorization.
+    """
+    import asyncio
+    loop = asyncio.get_running_loop()
+    success = await loop.run_in_executor(None, load_api_keys_cache)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reload API keys from Supabase."
+        )
+    return {"message": f"Successfully reloaded API keys. Currently cached: {len(api_keys_cache)} keys."}
+
+
+@app.post(
+    "/webhook/keys",
+    summary="Supabase API keys synchronization webhook",
+    tags=["System"],
+)
+async def webhook_reload_keys(
+    secret: str = Query(..., description="Secure webhook authentication token")
+):
+    """
+    Receives database change notifications for API keys from Supabase.
+    Triggers an instant reload of API keys into RAM cache.
+    """
+    if secret != WEBHOOK_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized: Invalid webhook secret token."
+        )
+        
+    import asyncio
+    loop = asyncio.get_running_loop()
+    success = await loop.run_in_executor(None, load_api_keys_cache)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reload API keys from Supabase."
+        )
+    return {"message": "API keys cache reloaded successfully in response to webhook."}

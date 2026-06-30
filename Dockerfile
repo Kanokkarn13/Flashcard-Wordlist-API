@@ -27,6 +27,7 @@ WORKDIR /app
 
 # Copy the verified database and application code
 COPY --from=builder /app/hsk_vocab.db .
+COPY --from=builder /app/hsk_vocab.csv .
 COPY --from=builder /root/.local /root/.local
 COPY app/ app/
 
@@ -37,5 +38,5 @@ ENV PYTHONUNBUFFERED=1
 # Expose port (Render exposes dynamically, but 8000 is default local fallback)
 EXPOSE 8000
 
-# Run uvicorn server, dynamically mapping port from PORT environment variable
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run uvicorn server, dynamically mapping port from PORT environment variable, fixed to 1 worker for RAM cache consistency
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
