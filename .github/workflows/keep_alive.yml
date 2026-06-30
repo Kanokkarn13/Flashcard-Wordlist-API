@@ -1,0 +1,21 @@
+name: Keep Alive (Prevent Render Sleep)
+
+on:
+  schedule:
+    - cron: '*/10 * * * *' # Run every 10 minutes
+  workflow_dispatch: # Allow manual run from the GitHub Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Health Endpoint
+        run: |
+          echo "Pinging HSK API Health Check..."
+          RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null https://flashcard-wordlist-api.onrender.com/health)
+          echo "Response HTTP Status: $RESPONSE"
+          if [ "$RESPONSE" -eq 200 ]; then
+            echo "Success: Server is awake!"
+          else
+            echo "Warning: Server returned status $RESPONSE"
+          fi
