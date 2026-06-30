@@ -234,9 +234,9 @@ async def create_api_key(body: KeyCreateSchema):
     new_key = f"hsk_key_{secrets.token_hex(16)}"
     
     url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
-    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
+    auth_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
     
-    if not url_base or not anon_key:
+    if not url_base or not auth_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Configuration error: Supabase credentials missing."
@@ -244,8 +244,8 @@ async def create_api_key(body: KeyCreateSchema):
         
     url = f"{url_base}/rest/v1/api_keys"
     headers = {
-        "apikey": anon_key,
-        "Authorization": f"Bearer {anon_key}",
+        "apikey": auth_key,
+        "Authorization": f"Bearer {auth_key}",
         "Content-Type": "application/json",
         "Prefer": "return=representation"
     }
@@ -290,9 +290,9 @@ async def list_api_keys():
     Requires `X-ADMIN-KEY` authorization.
     """
     url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
-    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
+    auth_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
     
-    if not url_base or not anon_key:
+    if not url_base or not auth_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Configuration error: Supabase credentials missing."
@@ -300,8 +300,8 @@ async def list_api_keys():
         
     url = f"{url_base}/rest/v1/api_keys?order=id.desc"
     headers = {
-        "apikey": anon_key,
-        "Authorization": f"Bearer {anon_key}"
+        "apikey": auth_key,
+        "Authorization": f"Bearer {auth_key}"
     }
     
     try:
@@ -334,17 +334,17 @@ async def revoke_api_key(
     Requires `X-ADMIN-KEY` authorization.
     """
     url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
-    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
+    auth_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
     
-    if not url_base or not anon_key:
+    if not url_base or not auth_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Configuration error: Supabase credentials missing."
         )
         
     headers = {
-        "apikey": anon_key,
-        "Authorization": f"Bearer {anon_key}",
+        "apikey": auth_key,
+        "Authorization": f"Bearer {auth_key}",
         "Content-Type": "application/json"
     }
     

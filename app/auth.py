@@ -28,7 +28,7 @@ def load_api_keys_cache() -> bool:
     Also seeds the local developer API key fallback.
     """
     url_base = os.getenv("SUPABASE_URL") or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
-    anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
+    auth_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY") or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
 
     dev_key = os.getenv("API_KEY", "hsk_dev_secret_key")
     fallback_records = {
@@ -40,7 +40,7 @@ def load_api_keys_cache() -> bool:
         }
     }
 
-    if not url_base or not anon_key:
+    if not url_base or not auth_key:
         logger.warning("Auth: Supabase credentials not found. Seeding local developer API key only.")
         global api_keys_cache
         api_keys_cache.clear()
@@ -49,8 +49,8 @@ def load_api_keys_cache() -> bool:
 
     url = f"{url_base}/rest/v1/api_keys?is_active=eq.true"
     headers = {
-        "apikey": anon_key,
-        "Authorization": f"Bearer {anon_key}"
+        "apikey": auth_key,
+        "Authorization": f"Bearer {auth_key}"
     }
 
     try:
