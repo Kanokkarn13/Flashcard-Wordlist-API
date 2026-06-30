@@ -12,7 +12,7 @@ jobs:
       - name: Ping Health Endpoint
         run: |
           echo "Pinging HSK API Health Check..."
-          RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null https://flashcard-wordlist-api.onrender.com/health)
+          RESPONSE=$(curl -s -w "%{http_code}" -o /dev/null --connect-timeout 10 --max-time 120 https://flashcard-wordlist-api.onrender.com/health)
           echo "Response HTTP Status: $RESPONSE"
           if [ "$RESPONSE" -eq 200 ]; then
             echo "Success: Server is awake!"
