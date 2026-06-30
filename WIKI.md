@@ -277,3 +277,31 @@ To deploy the API Hub on Render:
    - Because the keys and wordlists are loaded dynamically from Supabase into memory, Render persistent disks are **NOT** required. The application can run on fully stateless web services.
 5. **Single-Worker Process**:
    - The application must run as a single Uvicorn worker process to ensure in-memory cache consistency (this is explicitly configured inside the Dockerfile with `--workers 1`). Do not configure multi-worker orchestration on the server unless using a shared external cache like Redis.
+
+---
+
+## 🤖 Automated CI/CD & Maintenance Workflows (GitHub Actions)
+
+The repository includes pre-configured automation pipelines under `.github/workflows/` to manage database backups and instance uptime.
+
+### 1. Weekly Supabase Data Sync & Backup (`sync_backup.yml`)
+Runs a weekly scheduled pipeline to keep the static backup files in the Git repository updated as a fallback in case Supabase is unreachable at startup.
+- **Triggers**: 
+  - Every Sunday at 00:00 UTC.
+  - Manual trigger via the GitHub Actions UI tab (**Workflow Dispatch**).
+- **Execution Flow**:
+  1. Checks out the repository and configures Python 3.11.
+  2. Executes [scripts/update_git_backup.py](file:///c:/Users/callm/OneDrive/Desktop/Flashcard-Wordlist-API/scripts/update_git_backup.py) to fetch, merge, and export the Supabase dataset to `hsk_vocab.csv` and recompile `hsk_vocab.db`.
+  3. Commits and pushes the updated CSV and SQLite files back to the `main` branch of the Git repository automatically.
+- **Required Repository Secrets**:
+  - `SUPABASE_URL`: Your Supabase URL endpoint.
+  - `SUPABASE_ANON_KEY`: Your Supabase client anonymous public key.
+
+### 2. Keep Alive / Prevent Sleep (`keep_alive.yml`)
+Render's free tier web services spin down (go to sleep) after 15 minutes of inactivity. This workflow pings the health endpoint to prevent instance spin-down.
+- **Triggers**:
+  - Every 10 minutes.
+  - Manual trigger via the Actions tab.
+- **Execution Flow**:
+  1. Sends a lightweight `curl` HTTP GET request to `https://flashcard-wordlist-api.onrender.com/health`.
+  2. Asserts and logs the HTTP return status code (expects `200 OK`) to guarantee that the server is awake and responsive.

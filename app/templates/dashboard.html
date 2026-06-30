@@ -574,7 +574,7 @@
                 const healthRes = await fetch(`${API_BASE}/health`);
                 if (healthRes.ok) {
                     const health = await healthRes.json();
-                    document.getElementById('stat-db-count').innerText = health.database_records.toLocaleString() + ' words';
+                    document.getElementById('stat-db-count').innerText = health.cache_records.toLocaleString() + ' words';
                     document.getElementById('badge-db-status').innerText = 'Online';
                     document.getElementById('badge-db-status').className = 'badge badge-success';
                 }
