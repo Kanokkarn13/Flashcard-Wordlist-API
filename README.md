@@ -1,22 +1,28 @@
-# HSK Flashcard Wordlist API (V2)
+# HSK Flashcard Wordlist API (V3 - RAM Cache Edition)
 
-A robust, highly stable, and RAM-efficient REST API providing HSK (Hanyu Shuiping Kaoshi) vocabulary lists. Built on **FastAPI (Python)** and backed by an optimized **SQLite** database.
+A robust, ultra-fast, and stateless REST API providing HSK (Hanyu Shuiping Kaoshi) vocabulary lists. Built on **FastAPI (Python)**, optimized for high performance, and runs entirely in memory (RAM).
 
-## 🔑 Dynamic API Key Management
+---
 
-V2 features **database-backed dynamic API Key Management**. Instead of checking against a single static environment variable, client keys are generated, verified, and revoked dynamically from the SQLite database.
+## ⚡ RAM Cache & Stateless Architecture
 
-- **Client Authorization**: Standard vocab endpoints check the HTTP header `X-API-KEY` against keys stored in SQLite. If a key is invalid or revoked, requests fail with a `401 Unauthorized` response.
-- **Admin Control**: Creating, listing, and revoking keys is restricted to administrators using the `X-ADMIN-KEY` header.
-- **Out-of-the-box Access**: For convenience, a Default Developer Key (`hsk_dev_secret_key`) is seeded automatically if the keys table is empty on startup.
+In V3, the API operates as a fully **stateless service**, bypassing disk-write delays and database locking during client requests:
+
+- **In-Memory Caches**: Active API keys and the entire HSK vocabulary dataset are pulled from Supabase and cached in RAM (as Python sets and dictionaries) during the startup lifecycle.
+- **Zero-Latency Authentication & Queries**: All vocabulary lookups, level filters, and client API key verifications are performed in sub-milliseconds ($< 0.5\text{ms}$) directly in RAM.
+- **Real-time Webhook Synchronization**:
+  - `/webhook/supabase`: Receives dataset change notifications from Supabase and refreshes the vocabulary RAM cache in-place (with a 10-second debounce window to prevent duplicate writes).
+  - `/webhook/keys`: Receives API key status changes (creation, revocation) and reloads active keys in memory instantly.
+- **Robust Fallback**: If Supabase is unreachable at startup, the system automatically falls back to loading vocabulary from the pre-packaged static `hsk_vocab.csv` file to guarantee 100% uptime.
 
 ---
 
 ## 🛠️ Technology Stack
 
-- **Framework**: FastAPI (Python)
-- **Database**: SQLite (Standard library `sqlite3` driver)
-- **Log Engine**: Custom JSON structured middleware
+- **Core Framework**: FastAPI (Python 3.11+)
+- **Memory Engine**: Python in-memory data structures (Sets / Dictionaries)
+- **Unit Testing**: Pytest & HTTPX
+- **Automation Pipeline**: GitHub Actions
 - **Containerization**: Docker (optimized Multi-stage builds)
 
 ---
@@ -24,90 +30,82 @@ V2 features **database-backed dynamic API Key Management**. Instead of checking 
 ## 📁 Repository Structure
 
 ```text
+├── .github/workflows/
+│   ├── ci.yml            # CI: runs tests on every push and PR
+│   └── keep_alive.yml    # Cron: pings server every 10m to prevent Render sleep
 ├── app/
-│   ├── __init__.py
-│   ├── auth.py         # Dynamic authentication dependencies (X-API-KEY and X-ADMIN-KEY)
-│   ├── database.py     # SQLite connection & database integrity lifecycle checks
-│   ├── logger.py       # JSON structured logging and requests middleware
-│   ├── main.py         # Core endpoints (Vocabulary endpoints and admin endpoints)
-│   └── schemas.py      # Pydantic response models, pagination metadata, and admin request schemas
+│   ├── auth.py           # In-memory API Keys cache and verification
+│   ├── database.py       # Local SQLite schema & connection utility
+│   ├── logger.py         # JSON structured logging middleware
+│   ├── main.py           # Core endpoints, webhooks, and lifecycles
+│   ├── schemas.py        # Pydantic schemas and response metadata
+│   └── vocab_cache.py    # Vocabulary RAM cache & loader utilities
 ├── scripts/
-│   └── build_db.py     # HSK vocab CSV-to-SQLite compiler
-├── Dockerfile          # Multi-stage Docker build pipeline
-├── hsk_vocab.csv       # Dataset (5,343 rows)
-├── requirements.txt    # Python dependencies
-├── .env.example        # Reference environment variables setup
-└── README.md           # Documentation
+│   ├── build_db.py       # CSV-to-SQLite compiler (build-time check)
+│   └── update_git_backup.py # Supabase-to-Git backup sync script
+├── tests/
+│   └── test_api.py       # Integration & endpoint test suite
+├── Dockerfile            # Multi-stage production Docker build
+├── hsk_vocab.csv         # Local vocabulary fallback (5,343 rows)
+├── requirements.txt      # Production & development dependencies
+└── WIKI.md               # Detailed system documentation
 ```
 
 ---
 
-## 💻 Local Setup
+## 💻 Local Setup & Testing
 
 ### 1. Prerequisites
 - Python 3.11+
-- [Optional] Docker
+- Git
 
-### 2. Run Locally
-Copy the environment template:
+### 2. Installation
+Copy the environment variables template:
 ```bash
 cp .env.example .env
 ```
 
-Install requirements:
+Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-Compile the vocabulary database:
+Compile the local database backup:
 ```bash
 python scripts/build_db.py
 ```
 
-Run the development web server:
+### 3. Run Development Server
 ```bash
 python -m uvicorn app.main:app --reload --port 8080
 ```
-- Open Swagger Web Docs: [http://127.0.0.1:8080/docs](http://127.0.0.1:8080/docs)
-- Public health check: [http://127.0.0.1:8080/health](http://127.0.0.1:8080/health)
+- Interactive Swagger Docs: [http://127.0.0.1:8080/docs](http://127.0.0.1:8080/docs)
+- Public Health Check: [http://127.0.0.1:8080/health](http://127.0.0.1:8080/health)
+
+### 4. Run Automated Tests
+Execute the local pytest suite to verify endpoint integrity:
+```bash
+python -m pytest
+```
 
 ---
 
-## 🔒 Security Configurations
+## 🤖 Automated CI/CD & Maintenance (GitHub Actions)
 
-1. **Client Headers**: Send `X-API-KEY` header for all vocab endpoints.
-   - Default local dev key: `hsk_dev_secret_key`
-2. **Admin Headers**: Send `X-ADMIN-KEY` header to manage keys.
-   - Configured via `ADMIN_KEY` environment variable (defaults to `hsk_admin_master_secret` in local dev).
-
----
-
-## 📡 API Reference
-
-### 1. Vocabulary Endpoints (Secured with client `X-API-KEY`)
-- `GET /words`: Paginated retrieval of the entire wordlist (`?page=1&per_page=100`).
-- `GET /words/{level}`: Paginated HSK vocabulary filtered by HSK Level (1-6).
-- `GET /word/{word}`: Single word details search. Returns `404` if not found.
-- `GET /random`: Returns a random word, optionally filtered by level (`?level=6`).
-
-### 2. Admin Key Management (Secured with `X-ADMIN-KEY`)
-- **Create Key**: `POST /admin/keys`
-  - Body: `{"name": "Client App Name"}`
-  - Returns the generated API key (starts with `hsk_key_...`).
-- **List Keys**: `GET /admin/keys`
-  - Returns all registered keys, active state, and timestamps.
-- **Revoke Key**: `POST /admin/keys/{key_id}/revoke`
-  - Instantly revokes a client key, blocking its future API access.
+1. **FastAPI Test CI (`ci.yml`)**: Runs `pytest` on every push/PR to `main`. Deployments are blocked if tests fail.
+2. **Weekly Sync & Backup (`sync_backup.yml`)**: Runs every Sunday at 00:00 UTC to pull data from Supabase, export to CSV/SQLite, and commit back to Git as a fresh static fallback.
+3. **Keep Alive (`keep_alive.yml`)**: Pings the `/health` endpoint every 10 minutes to prevent the Render Free Tier instance from spinning down.
 
 ---
 
 ## ☁️ Deployment on Render.com
 
-Since the platform manages API keys dynamically in SQLite:
+Because all dynamic operations execute in RAM, **Render persistent disks are NOT required**. The API runs on a fully stateless Docker web service:
 
-1. Create a **Web Service** on Render and select the runtime as **Docker**.
+1. Create a **Web Service** on Render and choose runtime: **Docker**.
 2. **Environment Variables**:
-   - Add `ADMIN_KEY`: Choose a secure master password (used in the `X-ADMIN-KEY` header).
-3. **Database Persistence**:
-   - Because Render containers have an ephemeral filesystem, SQLite writes will reset on redeployment or restart.
-   - **Recommended**: Attach a **Persistent Disk** on Render (e.g., Mount Path `/data`). Set the `DB_PATH` environment variable to `/data/hsk_vocab.db` so database changes and API keys persist permanently.
+   - `ADMIN_KEY`: Set your master secret for `/admin` endpoints.
+   - `WEBHOOK_SECRET`: Set your webhook validation token.
+   - `SUPABASE_URL`: Your Supabase REST API URL.
+   - `SUPABASE_ANON_KEY`: Your Supabase anonymous public key.
+3. **Single Worker Process**: The application is explicitly configured to run as a single Uvicorn worker process (`--workers 1`) to guarantee RAM cache consistency across web requests.

@@ -305,3 +305,14 @@ Render's free tier web services spin down (go to sleep) after 15 minutes of inac
 - **Execution Flow**:
   1. Sends a lightweight `curl` HTTP GET request to `https://flashcard-wordlist-api.onrender.com/health`.
   2. Asserts and logs the HTTP return status code (expects `200 OK`) to guarantee that the server is awake and responsive.
+
+### 3. FastAPI Test CI (`ci.yml`)
+Performs automated verification testing on the codebase before merging or deploying to production.
+- **Triggers**:
+  - Every `push` targeting the `main` branch.
+  - Every `pull_request` targeting the `main` branch.
+- **Execution Flow**:
+  1. Checks out the repository and sets up Python 3.11.
+  2. Installs codebase and testing dependencies (`pytest`, `httpx`).
+  3. Executes `pytest` to validate core endpoint logic, authorization, health stats, and webhook integrity.
+  4. If any test fails, the build status is set to failed, preventing deployment processes.
