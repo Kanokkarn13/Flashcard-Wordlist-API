@@ -355,6 +355,27 @@
             color: var(--text-muted);
         }
 
+        .btn-copy-small {
+            padding: 3px 8px;
+            background: rgba(167, 139, 250, 0.1);
+            color: #a78bfa;
+            border: 1px solid rgba(167, 139, 250, 0.2);
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-left: 8px;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .btn-copy-small:hover {
+            background: rgba(167, 139, 250, 0.2);
+            border-color: rgba(167, 139, 250, 0.4);
+            color: #c084fc;
+        }
+
         .btn-revoke {
             padding: 6px 12px;
             background: rgba(239, 68, 68, 0.1);
@@ -629,7 +650,10 @@
                 tr.innerHTML = `
                     <td>${k.id}</td>
                     <td style="font-weight: 500;">${k.name}</td>
-                    <td class="td-key">${keyDisplay}</td>
+                    <td class="td-key" style="display: flex; align-items: center;">
+                        <span>${keyDisplay}</span>
+                        <button class="btn-copy-small" onclick="copyKeyText('${k.key}', this)">Copy</button>
+                    </td>
                     <td style="color: var(--text-muted); font-size: 0.85rem;">${k.created_at}</td>
                     <td>${statusBadge}</td>
                     <td style="text-align: right;">${actionButton}</td>
@@ -692,6 +716,25 @@
                 }, 1500);
             }).catch(err => {
                 alert('Could not copy to clipboard. Select text manually.');
+            });
+        }
+
+        // Copy generic key helper for row-by-row key copying
+        function copyKeyText(text, btn) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = btn.innerText;
+                btn.innerText = 'Copied!';
+                btn.style.color = '#34d399';
+                btn.style.borderColor = 'rgba(52, 211, 153, 0.4)';
+                btn.style.background = 'rgba(52, 211, 153, 0.1)';
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.style.color = '#a78bfa';
+                    btn.style.borderColor = 'rgba(167, 139, 250, 0.2)';
+                    btn.style.background = 'rgba(167, 139, 250, 0.1)';
+                }, 1500);
+            }).catch(err => {
+                alert('Could not copy to clipboard. Copy manually.');
             });
         }
 
